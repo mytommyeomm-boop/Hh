@@ -1,0 +1,947 @@
+-- ═══════════════════════════════════════════════════════════════════════
+-- ╔═══════════════════════════════════════════════════════════════════╗
+-- ║  LUCK MEGA SYSTEM v4.0 — ALL-IN-ONE                              ║
+-- ║  ModuleScript ใน ReplicatedStorage                                ║
+-- ║  รองรับทั้ง Server และ Client (auto-detect)                       ║
+-- ║                                                                   ║
+-- ║  ┌─ SERVER: 25 แหล่งโชค์ + Filter + Coins + Shop + Cosmic        ║
+-- ║  └─ CLIENT: UI Stats + Shop tabs                                  ║
+-- ╚═══════════════════════════════════════════════════════════════════╝
+-- ═══════════════════════════════════════════════════════════════════════
+local RunService   = game:GetService("RunService")
+local Players      = game:GetService("Players")
+local RS           = game:GetService("ReplicatedStorage")
+
+local LuckMega = {}
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- CONFIG (ใช้ร่วมกันทั้ง server/client)
+-- ═══════════════════════════════════════════════════════════════════════
+local CFG = {
+    BASE_LUCK           = 1,
+    MAX_LUCK            = 50000,
+
+    -- Pity
+    PITY_THRESHOLD      = 30,
+    PITY_BONUS          = 2,
+    PITY_GOOD_SCORE     = 500,
+
+    -- Streak
+    STREAK_MAX          = 10,
+    STREAK_PER          = 0.25,
+    STREAK_TIMEOUT      = 90,
+
+    -- Daily
+    DAILY_BONUS         = {0.5, 0.75, 1, 1.25, 1.5, 2, 3},
+    DAILY_RESET_HOURS   = 20,
+
+    -- Playtime
+    PLAYTIME_PER_HOUR   = 0.15,
+    PLAYTIME_MAX        = 3,
+
+    -- Multipliers
+    GROUP_BONUS_MULT    = 1.2,
+    PREMIUM_MULT        = 1.15,
+
+    -- Friends
+    FRIEND_PER          = 0.05,
+    FRIEND_MAX          = 1,
+
+    -- Killstreak
+    KILLSTREAK_PER      = 0.1,
+    KILLSTREAK_MAX      = 3,
+
+    -- Achievement
+    ACH_PER             = 0.05,
+    ACH_MAX             = 3,
+
+    -- Server Heat
+    HEAT_MULT_PER_PLAYER= 0.02,
+    HEAT_MAX            = 1.5,
+
+    -- Time of Day
+    TIME_BONUS = {
+        [0]=0,[1]=0,[2]=1.5,[3]=1.5,[4]=1,[5]=0.5,[6]=0,[7]=0,[8]=0,[9]=0,
+        [10]=0,[11]=0,[12]=0.5,[13]=0,[14]=0,[15]=0,[16]=0,[17]=0,[18]=0,
+        [19]=1,[20]=2,[21]=2.5,[22]=2,[23]=1,
+    },
+
+    -- Low-luck comp
+    LOW_LUCK_THRESHOLD  = 3,
+    LOW_LUCK_BONUS      = 0.75,
+
+    -- Coins
+    COIN_PER_KILL       = 1,
+    COIN_PER_ROLL       = 0.1,
+    COIN_PER_QUEST      = 10,
+
+    -- Cosmic
+    COSMIC_INTERVAL     = 600,
+    COSMIC_DURATION     = 120,
+
+    -- Filter ของกาก
+    FILTER = {
+        MIN_CHANCE       = 100,
+        BLACKLIST        = {},
+        WHITELIST        = {},
+        RARE_BOOST       = true,
+        RARE_BOOST_FROM  = 2500,
+        RARE_BOOST_MULT  = 3,
+    },
+
+    GROUP_ID = 0,
+}
+
+local ATTR = {
+    LUCK="Luck", DONOR_LUCK="DonorLuck",
+    POTION_LUCK="PotionLuck", POTION_LUCK_ADD="PotionLuckAdd",
+    TRAIT_LUCK="TraitLuck", QUEST_LUCK="QuestLuck", ADMIN_LUCK="AdminLuck",
+    EVENT_LUCK="EventLuck",
+    CHARM_FLAT="CharmLuck", CHARM_MULT="CharmMult",
+    PITY_COUNT="PityCount",
+    STREAK_COUNT="LuckyStreak", STREAK_AT="LuckyStreakAt",
+    DAILY_DAY="DailyLoginDay", DAILY_AT="DailyLoginAt",
+    PLAYTIME="PlaytimeSeconds",
+    GROUP_MULT="GroupMult", PREMIUM_MULT="PremiumMult",
+    FRIENDS_FLAT="FriendsFlat", KILLSTREAK="Killstreak",
+    ACH_COUNT="AchievementCount", GEM_MULT="GemMult",
+    COINS="LuckCoins",
+    COSMIC_MULT="CosmicMult", COSMIC_NAME="CosmicName", COSMIC_UNTIL="CosmicUntil",
+    HEAT_MULT="HeatMult", TIME_BONUS="TimeBonus",
+    SERVER_LUCK="ServerLuck", SERVER_LUCK_UNTIL="ServerLuckUntil",
+}
+
+LuckMega.CFG  = CFG
+LuckMega.ATTR = ATTR
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- TOTAL — ใช้ได้ทั้ง server/client (อ่าน attribute)
+-- ═══════════════════════════════════════════════════════════════════════
+function LuckMega.total(player)
+    if not (player and player.Parent) then return CFG.BASE_LUCK end
+    if player:GetAttribute("BossFight") then return 1 end
+
+    local p = player
+
+    -- Multipliers
+    local mult = 1
+    local function m(v) if v and v > 1 then mult = mult * v end end
+    m(math.max(p:GetAttribute(ATTR.LUCK) or 1, p:GetAttribute(ATTR.DONOR_LUCK) or 1))
+    m(p:GetAttribute(ATTR.POTION_LUCK))
+    m(p:GetAttribute(ATTR.ADMIN_LUCK))
+    m(p:GetAttribute(ATTR.EVENT_LUCK))
+    m(p:GetAttribute(ATTR.CHARM_MULT))
+    m(p:GetAttribute(ATTR.GEM_MULT))
+    m(p:GetAttribute(ATTR.GROUP_MULT))
+    m(p:GetAttribute(ATTR.PREMIUM_MULT))
+    m(p:GetAttribute(ATTR.COSMIC_MULT))
+    m(p:GetAttribute(ATTR.HEAT_MULT))
+    m(workspace:GetAttribute(ATTR.SERVER_LUCK))
+    if mult < 1 then mult = 1 end
+
+    -- Flats
+    local flat = 0
+    local function f(v) if v and v > 0 then flat = flat + v end end
+    f(p:GetAttribute(ATTR.TRAIT_LUCK))
+    f(p:GetAttribute(ATTR.QUEST_LUCK))
+    f(p:GetAttribute(ATTR.POTION_LUCK_ADD))
+    f(p:GetAttribute(ATTR.CHARM_FLAT))
+    f(p:GetAttribute(ATTR.FRIENDS_FLAT))
+    f(p:GetAttribute(ATTR.TIME_BONUS))
+
+    if (p:GetAttribute(ATTR.PITY_COUNT) or 0) >= CFG.PITY_THRESHOLD then
+        f(CFG.PITY_BONUS)
+    end
+
+    local st = p:GetAttribute(ATTR.STREAK_COUNT) or 0
+    f(math.min(st, CFG.STREAK_MAX) * CFG.STREAK_PER)
+
+    local day = p:GetAttribute(ATTR.DAILY_DAY) or 0
+    if day > 0 then
+        f(CFG.DAILY_BONUS[math.min(day, #CFG.DAILY_BONUS)] or 0)
+    end
+
+    local pt = (p:GetAttribute(ATTR.PLAYTIME) or 0) / 3600
+    f(math.min(pt * CFG.PLAYTIME_PER_HOUR, CFG.PLAYTIME_MAX))
+
+    f(math.min(p:GetAttribute(ATTR.KILLSTREAK) or 0, CFG.KILLSTREAK_MAX) * CFG.KILLSTREAK_PER)
+    f(math.min(p:GetAttribute(ATTR.ACH_COUNT) or 0, CFG.ACH_MAX))
+
+    if (mult + flat) < CFG.LOW_LUCK_THRESHOLD then
+        f(CFG.LOW_LUCK_BONUS)
+    end
+
+    return math.min(mult + flat, CFG.MAX_LUCK)
+end
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- FILTER — ตัดของกาก (ใช้ได้ทั้ง 2 ฝั่ง)
+-- ═══════════════════════════════════════════════════════════════════════
+function LuckMega.filterPool(pool)
+    if type(pool) ~= "table" then return {} end
+    local F = CFG.FILTER
+
+    local black = {}
+    for _, n in F.BLACKLIST do black[n] = true end
+
+    local white = nil
+    if #F.WHITELIST > 0 then
+        white = {}
+        for _, n in F.WHITELIST do white[n] = true end
+    end
+
+    local out = {}
+    for _, atk in pool do
+        if type(atk) ~= "table" or not atk.Name then continue end
+
+        local keep
+        if white then
+            keep = white[atk.Name] == true
+        else
+            local c = tonumber(atk.Chance) or 0
+            keep = c >= F.MIN_CHANCE
+            if black[atk.Name] then keep = false end
+        end
+
+        if keep then
+            local copy = table.clone(atk)
+            if F.RARE_BOOST then
+                local c = tonumber(copy.Chance) or 0
+                if c >= F.RARE_BOOST_FROM then
+                    copy.Chance = c * F.RARE_BOOST_MULT
+                end
+            end
+            out[#out+1] = copy
+        end
+    end
+    return out
+end
+
+function LuckMega.weightedRoll(pool, luck)
+    luck = tonumber(luck) or 1
+    if #pool == 0 then return nil end
+
+    local total, weights = 0, {}
+    for i, atk in pool do
+        local c = math.max(tonumber(atk.Chance) or 1, 1)
+        local w = (1 / c) * luck
+        weights[i] = w
+        total = total + w
+    end
+
+    local r = math.random() * total
+    local acc = 0
+    for i, w in weights do
+        acc = acc + w
+        if r <= acc then return pool[i] end
+    end
+    return pool[#pool]
+end
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- SHOP DATA (client ก็อ่านได้เพื่อแสดง)
+-- ═══════════════════════════════════════════════════════════════════════
+LuckMega.SHOP = {
+    {id="potion_x15",  name="Potion ×1.5 (2m)",  cost=100,   kind="potion", effect="LuckMult", amount=1.5, duration=120},
+    {id="potion_x25",  name="Potion ×2.5 (2m)",  cost=250,   kind="potion", effect="LuckMult", amount=2.5, duration=120},
+    {id="potion_x5",   name="Potion ×5 (2m)",    cost=800,   kind="potion", effect="LuckMult", amount=5,   duration=120},
+    {id="potion_add1", name="+1 Luck (3m)",      cost=150,   kind="potion", effect="LuckAdd",  amount=1,   duration=180},
+    {id="charm_small", name="Small Charm",        cost=500,   kind="charm",  flat=0.25, mult=1.05},
+    {id="charm_med",   name="Medium Charm",       cost=1500,  kind="charm",  flat=0.5,  mult=1.10},
+    {id="charm_big",   name="Big Charm",          cost=5000,  kind="charm",  flat=1,    mult=1.20},
+    {id="gem_ruby",    name="Ruby Gem ×1.15",     cost=2000,  kind="gem",    mult=1.15},
+    {id="gem_sapphire",name="Sapphire ×1.30",     cost=6000,  kind="gem",    mult=1.30},
+    {id="gem_diamond", name="Diamond ×1.50",      cost=15000, kind="gem",    mult=1.50},
+    {id="clear_pity",  name="Clear Pity",         cost=500,   kind="clearPity"},
+}
+LuckMega.SHOP_BY_ID = {}
+for _, e in LuckMega.SHOP do LuckMega.SHOP_BY_ID[e.id] = e end
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- ╔═══════════════════════════════════════════════════════════════════╗
+-- ║                     SERVER-SIDE LOGIC                              ║
+-- ╚═══════════════════════════════════════════════════════════════════╝
+-- ═══════════════════════════════════════════════════════════════════════
+if RunService:IsServer() then
+
+    -- [S1] Breakdown
+    function LuckMega.breakdown(player)
+        local now = workspace:GetServerTimeNow()
+        local src = {}
+
+        local function add(name, icon, value, kind, untilT)
+            if not value then return end
+            if kind == "mult" and value <= 1 then return end
+            if kind == "flat" and value <= 0 then return end
+            local e = {name=name, icon=icon, value=value, kind=kind}
+            if untilT and untilT > now then e.remaining = untilT - now end
+            src[#src+1] = e
+        end
+
+        local p = player
+        add("Base",         "🎲", p:GetAttribute(ATTR.LUCK) or 1,   "mult")
+        add("Donor",        "💎", p:GetAttribute(ATTR.DONOR_LUCK) or 1, "mult")
+        add("Potion ×",     "🧪", p:GetAttribute(ATTR.POTION_LUCK), "mult",
+            p:GetAttribute(ATTR.POTION_LUCK .. "Until"))
+        add("Potion +",     "🧴", p:GetAttribute(ATTR.POTION_LUCK_ADD), "flat")
+        add("Trait",        "🎭", p:GetAttribute(ATTR.TRAIT_LUCK), "flat")
+        add("Quest",        "📜", p:GetAttribute(ATTR.QUEST_LUCK), "flat")
+        add("Admin",        "👑", p:GetAttribute(ATTR.ADMIN_LUCK), "mult")
+        add("Event",        "🎉", p:GetAttribute(ATTR.EVENT_LUCK), "mult")
+        add("Charm +",      "🔮", p:GetAttribute(ATTR.CHARM_FLAT), "flat")
+        add("Charm ×",      "✨", p:GetAttribute(ATTR.CHARM_MULT), "mult")
+        add("Gem",          "💠", p:GetAttribute(ATTR.GEM_MULT), "mult")
+        add("Group",        "👥", p:GetAttribute(ATTR.GROUP_MULT), "mult")
+        add("Premium",      "⭐", p:GetAttribute(ATTR.PREMIUM_MULT), "mult")
+        add("Friends",      "🤝", p:GetAttribute(ATTR.FRIENDS_FLAT), "flat")
+        add("Killstreak",   "⚔️",
+            math.min(p:GetAttribute(ATTR.KILLSTREAK) or 0, CFG.KILLSTREAK_MAX) * CFG.KILLSTREAK_PER, "flat")
+        add("Achievements", "🏆",
+            math.min(p:GetAttribute(ATTR.ACH_COUNT) or 0, CFG.ACH_MAX), "flat")
+        add("Time Bonus",   "🕐", p:GetAttribute(ATTR.TIME_BONUS), "flat")
+        add("Cosmic", p:GetAttribute(ATTR.COSMIC_NAME) or "🌌",
+            p:GetAttribute(ATTR.COSMIC_MULT), "mult", p:GetAttribute(ATTR.COSMIC_UNTIL))
+        add("Server Heat",  "🔥", p:GetAttribute(ATTR.HEAT_MULT), "mult")
+        add("Lucky Hour",   "⏰", workspace:GetAttribute(ATTR.SERVER_LUCK), "mult",
+            workspace:GetAttribute(ATTR.SERVER_LUCK_UNTIL))
+
+        local pity = p:GetAttribute(ATTR.PITY_COUNT) or 0
+        if pity >= CFG.PITY_THRESHOLD then add("Pity", "🛡️", CFG.PITY_BONUS, "flat") end
+
+        local st = p:GetAttribute(ATTR.STREAK_COUNT) or 0
+        if st > 0 then
+            add("Streak " .. st, "🔥", math.min(st, CFG.STREAK_MAX) * CFG.STREAK_PER, "flat")
+        end
+
+        local day = p:GetAttribute(ATTR.DAILY_DAY) or 0
+        if day > 0 then
+            add("Daily Day " .. day, "📅",
+                CFG.DAILY_BONUS[math.min(day, #CFG.DAILY_BONUS)] or 0, "flat")
+        end
+
+        local pt = (p:GetAttribute(ATTR.PLAYTIME) or 0) / 3600
+        if pt > 0 then
+            add("Playtime", "⌛",
+                math.min(pt * CFG.PLAYTIME_PER_HOUR, CFG.PLAYTIME_MAX), "flat")
+        end
+
+        return {
+            total   = LuckMega.total(player),
+            sources = src,
+            coins   = p:GetAttribute(ATTR.COINS) or 0,
+            pity    = {count=pity, threshold=CFG.PITY_THRESHOLD, active=pity>=CFG.PITY_THRESHOLD},
+            streak  = {count=st, max=CFG.STREAK_MAX},
+            daily   = {day=day, max=#CFG.DAILY_BONUS},
+            cosmic  = {name=p:GetAttribute(ATTR.COSMIC_NAME),
+                        remaining=(p:GetAttribute(ATTR.COSMIC_UNTIL) or 0) - now},
+        }
+    end
+
+    -- [S2] Potion
+    function LuckMega.applyPotion(player, cfg)
+        if not (player and player.Parent and type(cfg) == "table") then return false end
+        local effect   = cfg.Effect or "LuckAdd"
+        local amount   = tonumber(cfg.Amount) or 0.25
+        local duration = tonumber(cfg.Duration) or 120
+        if amount <= 0 or duration <= 0 then return false end
+
+        local now, untilT = workspace:GetServerTimeNow(), workspace:GetServerTimeNow() + duration
+
+        if effect == "LuckAdd" or effect == "LuckFlat" then
+            local key, u = ATTR.POTION_LUCK_ADD, ATTR.POTION_LUCK_ADD .. "Until"
+            local cur = player:GetAttribute(key) or 0
+            local uu  = player:GetAttribute(u) or 0
+            if uu < now then cur = 0 end
+            player:SetAttribute(key, cur + amount)
+            player:SetAttribute(u, math.max(untilT, uu))
+            task.delay(duration, function()
+                if player.Parent and (player:GetAttribute(u) or 0) <= workspace:GetServerTimeNow() + 0.5 then
+                    player:SetAttribute(key, 0)
+                end
+            end)
+        else
+            local key, u = ATTR.POTION_LUCK, ATTR.POTION_LUCK .. "Until"
+            local cur = player:GetAttribute(key) or 1
+            local uu  = player:GetAttribute(u) or 0
+            if uu < now then cur = 1 end
+            if amount > cur then
+                player:SetAttribute(key, amount)
+                player:SetAttribute(u, untilT)
+                task.delay(duration, function()
+                    if player.Parent and (player:GetAttribute(u) or 0) <= workspace:GetServerTimeNow() + 0.5 then
+                        player:SetAttribute(key, 1)
+                    end
+                end)
+            end
+        end
+        return true
+    end
+
+    -- [S3] onRoll
+    function LuckMega.onRoll(player, score)
+        if not (player and player.Parent and type(score) == "number") then return end
+        local pity   = player:GetAttribute(ATTR.PITY_COUNT)   or 0
+        local streak = player:GetAttribute(ATTR.STREAK_COUNT) or 0
+        if score <= CFG.PITY_GOOD_SCORE then
+            player:SetAttribute(ATTR.PITY_COUNT, 0)
+            player:SetAttribute(ATTR.STREAK_COUNT, streak + 1)
+            player:SetAttribute(ATTR.STREAK_AT, workspace:GetServerTimeNow())
+        else
+            player:SetAttribute(ATTR.PITY_COUNT, pity + 1)
+        end
+        LuckMega.addCoins(player, CFG.COIN_PER_ROLL)
+    end
+
+    -- [S4] Coins
+    function LuckMega.addCoins(player, n)
+        if not (player and player.Parent and type(n) == "number" and n > 0) then return end
+        player:SetAttribute(ATTR.COINS, (player:GetAttribute(ATTR.COINS) or 0) + n)
+    end
+
+    function LuckMega.spendCoins(player, n)
+        if not (player and player.Parent and type(n) == "number" and n > 0) then return false end
+        local cur = player:GetAttribute(ATTR.COINS) or 0
+        if cur < n then return false end
+        player:SetAttribute(ATTR.COINS, cur - n)
+        return true
+    end
+
+    -- [S5] Purchase
+    function LuckMega.purchase(player, itemId)
+        local entry = LuckMega.SHOP_BY_ID[itemId]
+        if not entry then return false, "invalid_item" end
+        if not LuckMega.spendCoins(player, entry.cost) then return false, "no_coins" end
+
+        if entry.kind == "potion" then
+            LuckMega.applyPotion(player, entry)
+        elseif entry.kind == "charm" then
+            local cf = player:GetAttribute(ATTR.CHARM_FLAT) or 0
+            local cm = player:GetAttribute(ATTR.CHARM_MULT) or 1
+            player:SetAttribute(ATTR.CHARM_FLAT, cf + (entry.flat or 0))
+            player:SetAttribute(ATTR.CHARM_MULT, cm * (entry.mult or 1))
+        elseif entry.kind == "gem" then
+            local cur = player:GetAttribute(ATTR.GEM_MULT) or 1
+            if entry.mult > cur then player:SetAttribute(ATTR.GEM_MULT, entry.mult) end
+        elseif entry.kind == "clearPity" then
+            player:SetAttribute(ATTR.PITY_COUNT, 0)
+        end
+        return true
+    end
+
+    -- [S6] Daily
+    function LuckMega.checkDaily(player)
+        if not (player and player.Parent) then return end
+        local now, last, day = os.time(), player:GetAttribute(ATTR.DAILY_AT) or 0, player:GetAttribute(ATTR.DAILY_DAY) or 0
+        local cd = CFG.DAILY_RESET_HOURS * 3600
+        local elapsed = now - last
+        if elapsed < cd then return end
+        if elapsed > cd * 2.4 then day = 0 end
+        day = (day % #CFG.DAILY_BONUS) + 1
+        player:SetAttribute(ATTR.DAILY_DAY, day)
+        player:SetAttribute(ATTR.DAILY_AT, now)
+        LuckMega.addCoins(player, 20 * day)
+    end
+
+    -- [S7] Lucky Hour
+    function LuckMega.luckyHour(level, duration)
+        local mult = (level == 3 and 4) or (level == 2 and 2.5) or (level == 1 and 1.5) or 2
+        duration = tonumber(duration) or 300
+        workspace:SetAttribute(ATTR.SERVER_LUCK, mult)
+        workspace:SetAttribute(ATTR.SERVER_LUCK_UNTIL, workspace:GetServerTimeNow() + duration)
+        task.delay(duration, function()
+            workspace:SetAttribute(ATTR.SERVER_LUCK, 1)
+            workspace:SetAttribute(ATTR.SERVER_LUCK_UNTIL, nil)
+        end)
+    end
+
+    -- [S8] Roll helper
+    function LuckMega.rollAttack(originalPool, player)
+        local luck = LuckMega.total(player)
+        local filtered = LuckMega.filterPool(originalPool)
+        local result = LuckMega.weightedRoll(filtered, luck)
+        if result then LuckMega.onRoll(player, result.Chance) end
+        return result
+    end
+
+    -- [S9] Refresh bonuses
+    function LuckMega.refreshBonuses(player)
+        if not (player and player.Parent) then return end
+
+        if CFG.GROUP_ID > 0 then
+            local ok, isIn = pcall(function() return player:IsInGroup(CFG.GROUP_ID) end)
+            player:SetAttribute(ATTR.GROUP_MULT, (ok and isIn) and CFG.GROUP_BONUS_MULT or 1)
+        end
+
+        player:SetAttribute(ATTR.PREMIUM_MULT,
+            player.MembershipType == Enum.MembershipType.Premium and CFG.PREMIUM_MULT or 1)
+
+        local friends = 0
+        for _, o in Players:GetPlayers() do
+            if o ~= player then
+                local ok, isF = pcall(function() return player:IsFriendsWith(o.UserId) end)
+                if ok and isF then friends = friends + 1 end
+            end
+        end
+        player:SetAttribute(ATTR.FRIENDS_FLAT, math.min(friends * CFG.FRIEND_PER, CFG.FRIEND_MAX))
+
+        player:SetAttribute(ATTR.TIME_BONUS, CFG.TIME_BONUS[os.date("!*t").hour] or 0)
+    end
+
+    -- [S10] Server init
+    function LuckMega._initServer()
+        -- Remotes
+        local Remotes = RS:FindFirstChild("LuckMegaRemotes")
+        if not Remotes then
+            Remotes = Instance.new("Folder")
+            Remotes.Name = "LuckMegaRemotes"
+            Remotes.Parent = RS
+        end
+
+        local GetBreakdown = Remotes:FindFirstChild("GetLuckBreakdown") or Instance.new("RemoteFunction")
+        GetBreakdown.Name = "GetLuckBreakdown"
+        GetBreakdown.Parent = Remotes
+        GetBreakdown.OnServerInvoke = function(plr)
+            return LuckMega.breakdown(plr)
+        end
+
+        local BuyItem = Remotes:FindFirstChild("PurchaseLuckItem") or Instance.new("RemoteFunction")
+        BuyItem.Name = "PurchaseLuckItem"
+        BuyItem.Parent = Remotes
+        BuyItem.OnServerInvoke = function(plr, id)
+            return LuckMega.purchase(plr, id)
+        end
+
+        local ShopList = Remotes:FindFirstChild("GetLuckShopList") or Instance.new("RemoteFunction")
+        ShopList.Name = "GetLuckShopList"
+        ShopList.Parent = Remotes
+        ShopList.OnServerInvoke = function()
+            return LuckMega.SHOP
+        end
+
+        -- Player hooks
+        Players.PlayerAdded:Connect(function(p)
+            task.wait(1)
+            LuckMega.refreshBonuses(p)
+            LuckMega.checkDaily(p)
+            if not p:GetAttribute(ATTR.COINS) then p:SetAttribute(ATTR.COINS, 0) end
+        end)
+        for _, p in Players:GetPlayers() do task.spawn(LuckMega.refreshBonuses, p) end
+
+        -- Playtime
+        task.spawn(function()
+            while true do
+                task.wait(10)
+                for _, p in Players:GetPlayers() do
+                    p:SetAttribute(ATTR.PLAYTIME, (p:GetAttribute(ATTR.PLAYTIME) or 0) + 10)
+                end
+            end
+        end)
+
+        -- Refresh
+        task.spawn(function()
+            while true do
+                task.wait(30)
+                for _, p in Players:GetPlayers() do LuckMega.refreshBonuses(p) end
+            end
+        end)
+
+        -- Heat
+        task.spawn(function()
+            while true do
+                task.wait(15)
+                local n = #Players:GetPlayers()
+                local heat = math.min(1 + n * CFG.HEAT_MULT_PER_PLAYER, CFG.HEAT_MAX)
+                for _, p in Players:GetPlayers() do
+                    p:SetAttribute(ATTR.HEAT_MULT, heat)
+                end
+            end
+        end)
+
+        -- Cleanup
+        task.spawn(function()
+            while true do
+                task.wait(5)
+                local now = workspace:GetServerTimeNow()
+                for _, p in Players:GetPlayers() do
+                    local at = p:GetAttribute(ATTR.STREAK_AT) or 0
+                    if (p:GetAttribute(ATTR.STREAK_COUNT) or 0) > 0 and now - at > CFG.STREAK_TIMEOUT then
+                        p:SetAttribute(ATTR.STREAK_COUNT, 0)
+                    end
+                    for _, key in {ATTR.POTION_LUCK, ATTR.POTION_LUCK_ADD} do
+                        local u = p:GetAttribute(key .. "Until") or 0
+                        if (p:GetAttribute(key) or 0) ~= 0 and u < now then
+                            p:SetAttribute(key, key == ATTR.POTION_LUCK and 1 or 0)
+                        end
+                    end
+                end
+            end
+        end)
+
+        -- Cosmic
+        local COSMIC = {
+            {name="🌙 Blood Moon",     mult=1.5, weight=25},
+            {name="⭐ Star Shower",    mult=1.8, weight=25},
+            {name="☀️ Solar Flare",    mult=2.0, weight=15},
+            {name="🌌 Galactic Pulse", mult=2.5, weight=10},
+            {name="🌑 Eclipse",        mult=3.0, weight=10},
+            {name="🎆 Nova",           mult=4.0, weight=5},
+            {name="💫 Comet",          mult=5.0, weight=5},
+            {name="🌈 Aurora",         mult=6.0, weight=5},
+        }
+
+        local function pick()
+            local total = 0
+            for _, e in COSMIC do total = total + e.weight end
+            local r = math.random() * total
+            for _, e in COSMIC do
+                r = r - e.weight
+                if r <= 0 then return e end
+            end
+            return COSMIC[1]
+        end
+
+        task.spawn(function()
+            while true do
+                task.wait(CFG.COSMIC_INTERVAL + math.random(-60, 60))
+                local ev = pick()
+                local untilT = workspace:GetServerTimeNow() + CFG.COSMIC_DURATION
+                for _, p in Players:GetPlayers() do
+                    p:SetAttribute(ATTR.COSMIC_MULT, ev.mult)
+                    p:SetAttribute(ATTR.COSMIC_NAME, ev.name)
+                    p:SetAttribute(ATTR.COSMIC_UNTIL, untilT)
+                end
+                task.delay(CFG.COSMIC_DURATION, function()
+                    for _, p in Players:GetPlayers() do
+                        if (p:GetAttribute(ATTR.COSMIC_UNTIL) or 0) <= workspace:GetServerTimeNow() + 1 then
+                            p:SetAttribute(ATTR.COSMIC_MULT, 1)
+                            p:SetAttribute(ATTR.COSMIC_NAME, nil)
+                            p:SetAttribute(ATTR.COSMIC_UNTIL, nil)
+                        end
+                    end
+                end)
+            end
+        end)
+
+        -- Expose globally
+        _G.Luck = LuckMega
+
+        print("[LuckMega] ✅ Server ready")
+    end
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- ╔═══════════════════════════════════════════════════════════════════╗
+-- ║                     CLIENT-SIDE LOGIC                              ║
+-- ╚═══════════════════════════════════════════════════════════════════╝
+-- ═══════════════════════════════════════════════════════════════════════
+else
+
+    function LuckMega._initClient()
+        local player = Players.LocalPlayer
+        local TweenService = game:GetService("TweenService")
+
+        local Remotes = RS:WaitForChild("LuckMegaRemotes", 20)
+        if not Remotes then
+            warn("[LuckMega] Remotes not found — server not ready?")
+            return
+        end
+
+        local GetBreakdown = Remotes:WaitForChild("GetLuckBreakdown", 10)
+        local BuyItem      = Remotes:WaitForChild("PurchaseLuckItem", 10)
+        local ShopList     = Remotes:WaitForChild("GetLuckShopList", 10)
+        if not (GetBreakdown and BuyItem and ShopList) then
+            warn("[LuckMega] Missing remotes")
+            return
+        end
+
+        local gui = Instance.new("ScreenGui")
+        gui.Name = "LuckMegaUI"
+        gui.ResetOnSpawn = false
+        gui.IgnoreGuiInset = true
+        gui.DisplayOrder = 6
+        gui.Parent = player:WaitForChild("PlayerGui")
+
+        -- Toggle
+        local toggle = Instance.new("TextButton")
+        toggle.AnchorPoint = Vector2.new(1, 0)
+        toggle.Position = UDim2.new(1, -16, 0, 16)
+        toggle.Size = UDim2.fromOffset(56, 56)
+        toggle.BackgroundColor3 = Color3.fromRGB(30, 200, 100)
+        toggle.Text = "🍀"
+        toggle.TextSize = 26
+        toggle.Font = Enum.Font.GothamBlack
+        toggle.BorderSizePixel = 0
+        toggle.Parent = gui
+        Instance.new("UICorner", toggle).CornerRadius = UDim.new(1, 0)
+        local ts = Instance.new("UIStroke")
+        ts.Color = Color3.new(1,1,1); ts.Thickness = 2; ts.Parent = toggle
+
+        -- Panel
+        local panel = Instance.new("Frame")
+        panel.AnchorPoint = Vector2.new(1, 0)
+        panel.Position = UDim2.new(1, -16, 0, 84)
+        panel.Size = UDim2.fromOffset(340, 520)
+        panel.BackgroundColor3 = Color3.fromRGB(22, 22, 26)
+        panel.BackgroundTransparency = 0.05
+        panel.BorderSizePixel = 0
+        panel.Visible = false
+        panel.Parent = gui
+        Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 12)
+        local ps = Instance.new("UIStroke")
+        ps.Color = Color3.fromRGB(80, 220, 130); ps.Thickness = 2; ps.Parent = panel
+
+        local header = Instance.new("TextLabel")
+        header.BackgroundTransparency = 1
+        header.Size = UDim2.new(1, 0, 0, 40)
+        header.Font = Enum.Font.GothamBlack
+        header.Text = "🍀 LUCK MEGA SYSTEM"
+        header.TextSize = 18
+        header.TextColor3 = Color3.fromRGB(120, 255, 160)
+        header.Parent = panel
+
+        local close = Instance.new("TextButton")
+        close.AnchorPoint = Vector2.new(1, 0)
+        close.Position = UDim2.new(1, -8, 0, 8)
+        close.Size = UDim2.fromOffset(28, 28)
+        close.BackgroundColor3 = Color3.fromRGB(200, 60, 60)
+        close.Text = "X"
+        close.TextColor3 = Color3.new(1,1,1)
+        close.Font = Enum.Font.GothamBold
+        close.TextSize = 14
+        close.BorderSizePixel = 0
+        close.Parent = panel
+        Instance.new("UICorner", close).CornerRadius = UDim.new(0, 6)
+        close.MouseButton1Click:Connect(function() panel.Visible = false end)
+
+        local totalLabel = Instance.new("TextLabel")
+        totalLabel.BackgroundTransparency = 1
+        totalLabel.Position = UDim2.fromOffset(12, 44)
+        totalLabel.Size = UDim2.new(1, -24, 0, 50)
+        totalLabel.Font = Enum.Font.GothamBlack
+        totalLabel.Text = "×1.00"
+        totalLabel.TextSize = 42
+        totalLabel.TextColor3 = Color3.new(1,1,1)
+        totalLabel.TextXAlignment = Enum.TextXAlignment.Left
+        totalLabel.Parent = panel
+
+        local coinLabel = Instance.new("TextLabel")
+        coinLabel.BackgroundTransparency = 1
+        coinLabel.AnchorPoint = Vector2.new(1, 0)
+        coinLabel.Position = UDim2.new(1, -12, 0, 58)
+        coinLabel.Size = UDim2.fromOffset(150, 26)
+        coinLabel.Font = Enum.Font.GothamBold
+        coinLabel.Text = "🪙 0"
+        coinLabel.TextSize = 20
+        coinLabel.TextColor3 = Color3.fromRGB(255, 220, 80)
+        coinLabel.TextXAlignment = Enum.TextXAlignment.Right
+        coinLabel.Parent = panel
+
+        local tabFrame = Instance.new("Frame")
+        tabFrame.Position = UDim2.fromOffset(12, 100)
+        tabFrame.Size = UDim2.new(1, -24, 0, 36)
+        tabFrame.BackgroundTransparency = 1
+        tabFrame.Parent = panel
+
+        local function makeTab(name, x, onClick)
+            local b = Instance.new("TextButton")
+            b.Position = UDim2.fromOffset(x, 0)
+            b.Size = UDim2.fromOffset(150, 34)
+            b.BackgroundColor3 = Color3.fromRGB(40, 40, 46)
+            b.Text = name
+            b.Font = Enum.Font.GothamBold
+            b.TextSize = 13
+            b.TextColor3 = Color3.new(1,1,1)
+            b.BorderSizePixel = 0
+            b.Parent = tabFrame
+            Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
+            b.MouseButton1Click:Connect(onClick)
+            return b
+        end
+
+        local breakdownPanel = Instance.new("ScrollingFrame")
+        breakdownPanel.Position = UDim2.fromOffset(12, 144)
+        breakdownPanel.Size = UDim2.new(1, -24, 1, -156)
+        breakdownPanel.BackgroundTransparency = 1
+        breakdownPanel.BorderSizePixel = 0
+        breakdownPanel.ScrollBarThickness = 4
+        breakdownPanel.CanvasSize = UDim2.new()
+        breakdownPanel.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        breakdownPanel.Parent = panel
+        Instance.new("UIListLayout", breakdownPanel).Padding = UDim.new(0, 4)
+
+        local shopPanel = Instance.new("ScrollingFrame")
+        shopPanel.Position = UDim2.fromOffset(12, 144)
+        shopPanel.Size = UDim2.new(1, -24, 1, -156)
+        shopPanel.BackgroundTransparency = 1
+        shopPanel.BorderSizePixel = 0
+        shopPanel.ScrollBarThickness = 4
+        shopPanel.CanvasSize = UDim2.new()
+        shopPanel.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        shopPanel.Visible = false
+        shopPanel.Parent = panel
+        Instance.new("UIListLayout", shopPanel).Padding = UDim.new(0, 4)
+
+        makeTab("📊 Stats", 0,   function() breakdownPanel.Visible = true;  shopPanel.Visible = false end)
+        makeTab("🛒 Shop",  160, function() breakdownPanel.Visible = false; shopPanel.Visible = true  end)
+
+        local open = false
+        toggle.MouseButton1Click:Connect(function() open = not open; panel.Visible = open end)
+
+        -- Render breakdown
+        local lastTotal = 1
+        local function renderBreakdown(data)
+            if not data then return end
+            totalLabel.Text = string.format("×%.2f", data.total or 1)
+            coinLabel.Text  = string.format("🪙 %d", data.coins or 0)
+
+            if math.abs((data.total or 1) - lastTotal) > 0.05 then
+                local c = (data.total or 1) > lastTotal
+                    and Color3.fromRGB(120, 255, 150)
+                    or Color3.fromRGB(255, 100, 100)
+                totalLabel.TextColor3 = c
+                TweenService:Create(totalLabel, TweenInfo.new(0.5),
+                    {TextColor3 = Color3.new(1,1,1)}):Play()
+                lastTotal = data.total or 1
+            end
+
+            for _, ch in breakdownPanel:GetChildren() do
+                if ch:IsA("Frame") then ch:Destroy() end
+            end
+
+            for _, src in data.sources do
+                local row = Instance.new("Frame")
+                row.Size = UDim2.new(1, 0, 0, 28)
+                row.BackgroundColor3 = Color3.fromRGB(35, 35, 42)
+                row.BorderSizePixel = 0
+                row.Parent = breakdownPanel
+                Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
+
+                local icon = Instance.new("TextLabel")
+                icon.BackgroundTransparency = 1
+                icon.Position = UDim2.fromOffset(6, 0)
+                icon.Size = UDim2.fromOffset(24, 28)
+                icon.Font = Enum.Font.GothamBold
+                icon.TextSize = 16
+                icon.Text = src.icon or "•"
+                icon.TextColor3 = Color3.new(1,1,1)
+                icon.Parent = row
+
+                local nameL = Instance.new("TextLabel")
+                nameL.BackgroundTransparency = 1
+                nameL.Position = UDim2.fromOffset(34, 0)
+                nameL.Size = UDim2.new(1, -130, 1, 0)
+                nameL.Font = Enum.Font.GothamMedium
+                nameL.TextSize = 13
+                nameL.Text = src.name
+                nameL.TextColor3 = Color3.fromRGB(220, 220, 230)
+                nameL.TextXAlignment = Enum.TextXAlignment.Left
+                nameL.Parent = row
+
+                local val = Instance.new("TextLabel")
+                val.BackgroundTransparency = 1
+                val.AnchorPoint = Vector2.new(1, 0)
+                val.Position = UDim2.new(1, -8, 0, 0)
+                val.Size = UDim2.fromOffset(120, 28)
+                val.Font = Enum.Font.GothamBold
+                val.TextSize = 13
+                if src.kind == "mult" then
+                    val.Text = string.format("×%.2f", src.value)
+                    val.TextColor3 = Color3.fromRGB(120, 220, 255)
+                else
+                    val.Text = string.format("+%.2f", src.value)
+                    val.TextColor3 = Color3.fromRGB(150, 255, 150)
+                end
+                if src.remaining then
+                    val.Text = val.Text .. string.format(" %ds", math.ceil(src.remaining))
+                end
+                val.TextXAlignment = Enum.TextXAlignment.Right
+                val.Parent = row
+            end
+        end
+
+        -- Shop
+        local okS, shopData = pcall(function() return ShopList:InvokeServer() end)
+        if okS and type(shopData) == "table" then
+            for _, item in shopData do
+                local btn = Instance.new("TextButton")
+                btn.Size = UDim2.new(1, 0, 0, 44)
+                btn.BackgroundColor3 = Color3.fromRGB(40, 60, 40)
+                btn.BorderSizePixel = 0
+                btn.AutoButtonColor = false
+                btn.Text = ""
+                btn.Parent = shopPanel
+                Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
+
+                local nameL = Instance.new("TextLabel")
+                nameL.BackgroundTransparency = 1
+                nameL.Position = UDim2.fromOffset(10, 0)
+                nameL.Size = UDim2.new(1, -100, 1, 0)
+                nameL.Font = Enum.Font.GothamBold
+                nameL.TextSize = 14
+                nameL.Text = item.name
+                nameL.TextColor3 = Color3.new(1,1,1)
+                nameL.TextXAlignment = Enum.TextXAlignment.Left
+                nameL.Parent = btn
+
+                local priceL = Instance.new("TextLabel")
+                priceL.BackgroundTransparency = 1
+                priceL.AnchorPoint = Vector2.new(1, 0)
+                priceL.Position = UDim2.new(1, -10, 0, 0)
+                priceL.Size = UDim2.fromOffset(80, 44)
+                priceL.Font = Enum.Font.GothamBold
+                priceL.TextSize = 14
+                priceL.Text = "🪙 " .. item.cost
+                priceL.TextColor3 = Color3.fromRGB(255, 220, 80)
+                priceL.TextXAlignment = Enum.TextXAlignment.Right
+                priceL.Parent = btn
+
+                btn.MouseButton1Click:Connect(function()
+                    local ok = BuyItem:InvokeServer(item.id)
+                    local target = ok and Color3.fromRGB(60, 160, 80) or Color3.fromRGB(180, 60, 60)
+                    btn.BackgroundColor3 = target
+                    TweenService:Create(btn, TweenInfo.new(0.4),
+                        {BackgroundColor3 = Color3.fromRGB(40, 60, 40)}):Play()
+                end)
+            end
+        end
+
+        -- Update loop
+        task.spawn(function()
+            while true do
+                task.wait(1.5)
+                if open then
+                    local ok, data = pcall(function() return GetBreakdown:InvokeServer() end)
+                    if ok then renderBreakdown(data) end
+                end
+            end
+        end)
+
+        -- FFA visibility
+        local function refreshVis()
+            toggle.Visible = player:GetAttribute("InFFA") ~= false
+        end
+        player:GetAttributeChangedSignal("InFFA"):Connect(refreshVis)
+        refreshVis()
+
+        print("[LuckMega] ✅ Client ready")
+    end
+
+end
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- AUTO-INIT (เรียกได้ทั้ง 2 ฝั่ง)
+-- ═══════════════════════════════════════════════════════════════════════
+local _serverDone, _clientDone = false, false
+
+function LuckMega.init()
+    if RunService:IsServer() then
+        if _serverDone then return end
+        _serverDone = true
+        LuckMega._initServer()
+    else
+        if _clientDone then return end
+        _clientDone = true
+        LuckMega._initClient()
+    end
+end
+
+return LuckMega
